@@ -2,586 +2,213 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>AR Camiseta — con foto/record (.mp4 preferido)</title>
+  <title>AR Camiseta</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+
   <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial, sans-serif}
-    #videoWrapper{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    video#cam{width:100%;height:100%;object-fit:cover;}
-    canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none; z-index:20}
-    #overlayContainer{position:fixed; left:50%; top:50%; pointer-events:none; z-index:9999; display:none; transform-origin:center center; background:transparent; transform:translate(-50%,-50%); }
-    #overlayContainer > video { display:block; width:100%; height:100%; background:transparent; object-fit:cover; }
-    #controls{position:fixed; right:12px; top:60px; z-index:10000; display:flex; flex-direction:column; gap:8px}
-    .ctrlBtn{padding:10px 12px;border-radius:8px;border:none;background:#ff4fa8;color:#fff;font-weight:600}
-    #startBtn{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:14px 18px;background:#ff4fa8;border-radius:10px;border:none;color:#fff;font-size:18px;z-index:40}
-    #log{position:fixed;left:8px;top:8px;background:rgba(0,0,0,0.6);padding:6px 8px;border-radius:6px;font-size:12px;z-index:40}
-    #bigMatch{position:fixed;left:8px;top:48px;font-size:18px;font-weight:700;color:#fff;text-shadow:0 0 6px #000;z-index:40}
-
-    /* Botón circular foto/record */
-    .cameraBar { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 11000; display:flex; align-items:center; justify-content:center; }
-    .shutterBtn {
-      width: 88px; height: 88px; border-radius: 50%;
-      background: linear-gradient(180deg,#ff5fb2,#ff2f87);
-      border: 6px solid rgba(255,255,255,0.15);
-      box-shadow: 0 8px 20px rgba(0,0,0,0.6);
-      display:flex; align-items:center; justify-content:center;
-      position:relative; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
+    #videoWrapper{position:fixed;inset:0;overflow:hidden}
+    #cam{width:100%;height:100%;object-fit:cover}
+    #overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
+    #overlayContainer{
+      position:fixed;left:50%;top:50%;
+      transform:translate(-50%,-50%);
+      pointer-events:none;
+      z-index:9999;
+      display:none;
+      background:transparent;
     }
-    .shutterInner {
-      width: 64px; height: 64px; border-radius: 50%;
-      background: #fff;
-      transition: transform 120ms ease;
-      display:flex; align-items:center; justify-content:center;
+    #overlayContainer video,
+    #overlayContainer canvas{
+      width:100%;
+      height:100%;
+      object-fit:contain;
+      background:transparent;
     }
-    .recording .shutterInner { background: #000; transform: scale(0.78); border-radius: 14px; }
-    .recDot {
-      width:12px; height:12px; border-radius:50%; background:#ff2b2b; position:absolute; top:8px; right:8px; display:none;
+    #startBtn{
+      position:fixed;left:50%;top:50%;
+      transform:translate(-50%,-50%);
+      padding:14px 18px;
+      font-size:18px;
+      border:none;border-radius:10px;
+      background:#ff4fa8;color:#fff;
+      z-index:10000;
     }
-    .recording .recDot { display:block; box-shadow:0 0 12px rgba(255,0,0,0.7); }
-
-    /* aro de progreso durante la hold->record timeout */
-    .progressRing { position:absolute; left:0; top:0; width:100%; height:100%; pointer-events:none; transform: rotate(-90deg); }
-    .progressRing svg { width:100%; height:100%; }
-    .progressRing circle { fill:none; stroke:rgba(255,255,255,0.18); stroke-width:6; stroke-linecap:round; }
-    .progressRing .progress { stroke: #fff; stroke-width:6; stroke-linecap:round; stroke-dasharray: 283; stroke-dashoffset: 283; transition: stroke-dashoffset 0.08s linear; }
+    #bigMatch{
+      position:fixed;left:10px;top:10px;
+      z-index:10000;font-size:14px;
+      background:rgba(0,0,0,0.5);
+      padding:6px 8px;border-radius:6px;
+    }
   </style>
 </head>
+
 <body>
-  <div id="videoWrapper">
-    <video id="cam" autoplay playsinline muted></video>
-    <canvas id="overlay"></canvas>
-  </div>
 
-  <div id="overlayContainer"></div>
+<div id="videoWrapper">
+  <video id="cam" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
 
-  <div id="controls">
-    <button id="testShow" class="ctrlBtn">Mostrar animación de prueba</button>
-    <button id="testHide" class="ctrlBtn">Ocultar animación</button>
-    <button id="toggleMode" class="ctrlBtn">Modo: Precisión</button>
-  </div>
+<div id="overlayContainer"></div>
 
-  <!-- Botón circular foto/record (sin texto de ayuda) -->
-  <div class="cameraBar">
-    <div id="shutter" class="shutterBtn" role="button" aria-label="Botón cámara">
-      <div class="progressRing" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="45" stroke-opacity="0.25"></circle>
-          <circle class="progress" cx="50" cy="50" r="45" stroke="#fff"></circle>
-        </svg>
-      </div>
-      <div class="recDot"></div>
-      <div class="shutterInner"></div>
-    </div>
-  </div>
-
-  <button id="startBtn">Activar AR</button>
-
-  <div id="log">iniciando...</div>
-  <div id="bigMatch">Match: --</div>
+<button id="startBtn">Activar AR</button>
+<div id="bigMatch">Match: --</div>
 
 <script>
-/* ---------- CONFIG ---------- */
+/* ================= CONFIG ================= */
 const TARGET_URL = './skeleton.png';
-const ANIM_URL = './skeleton.webm';
-let RES_SCALE = 0.70;
-let FRAME_SKIP = 2;
-let MODE = 'precision';
+const WEBM_URL  = './skeleton.webm';
+
+// PNG sequence (iOS)
+const PNG_PATH  = './assets/anim_png/';
+const PNG_COUNT = 8;
+const PNG_FPS   = 12;
+
 const REQUIRED_MATCHES = 10;
 const REQUIRED_INLIERS = 8;
-const CENTROID_THRESHOLD = 0.20;
-/* ---------------------------- */
+/* ========================================= */
 
 const cam = document.getElementById('cam');
-const overlay = document.getElementById('overlay');
 const overlayContainer = document.getElementById('overlayContainer');
 const startBtn = document.getElementById('startBtn');
-const logEl = document.getElementById('log');
 const bigMatch = document.getElementById('bigMatch');
-const testShow = document.getElementById('testShow');
-const testHide = document.getElementById('testHide');
-const toggleMode = document.getElementById('toggleMode');
 
-let worker = null;
-let streaming = false;
-let procW = 1, procH = 1;
-let offscreenForTransfer = null;
-let frameCounter = 0;
-let templW = 0, templH = 0;
-let videoStream = null; // referencia al MediaStream usada para recorder
+let worker, streaming=false;
+let procW=1, procH=1;
+let offscreen;
+let frameCounter=0;
+let RES_SCALE=0.7, FRAME_SKIP=2;
 
-function log(s){ logEl.textContent = s; console.log(s); }
-
-const overlayVideoMarkup = (filename) => `
-  <video id="fxVideo" autoplay loop muted playsinline preload="auto" crossorigin="anonymous" style="background:transparent;display:block;">
-    <source src="${filename}" type="video/webm">
-    <source src="${filename.replace('.webm','.mp4')}" type="video/mp4">
-  </video>`;
-
-function showOverlayCenteredFixed(sizePx){
-  let w = sizePx;
-  let h = Math.round(sizePx * (templH && templW ? (templH / templW) : 1));
-  if (!templW || !templH) h = w;
-  if (!document.getElementById('fxVideo')) overlayContainer.innerHTML = overlayVideoMarkup(ANIM_URL);
-  const v = document.getElementById('fxVideo');
-  overlayContainer.style.width = Math.max(10, w) + 'px';
-  overlayContainer.style.height = Math.max(10, h) + 'px';
-  overlayContainer.style.display = 'block';
-  overlayContainer.style.visibility = 'visible';
-  try { v.play().then(()=>{ log('video play ok'); }).catch(()=>{}); } catch(e){}
+/* ---------- iOS detection ---------- */
+function isIOS(){
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
-function hideOverlay(){ const fx = document.getElementById('fxVideo'); if (fx) try{ fx.pause(); }catch(e){} overlayContainer.style.display='none'; overlayContainer.style.visibility='hidden'; }
+const IS_IOS = isIOS();
 
-testShow.addEventListener('click', ()=> showOverlayCenteredFixed(Math.round(window.innerWidth*0.5)));
-testHide.addEventListener('click', ()=> hideOverlay());
-toggleMode.addEventListener('click', ()=>{ 
-  if (MODE === 'precision'){ MODE = 'speed'; RES_SCALE = 0.28; FRAME_SKIP = 4; toggleMode.textContent = 'Modo: Velocidad'; log('Modo velocidad'); }
-  else { MODE = 'precision'; RES_SCALE = 0.70; FRAME_SKIP = 2; toggleMode.textContent = 'Modo: Precisión'; log('Modo precisión'); }
-});
+/* ---------- Android video ---------- */
+const videoMarkup = `
+<video id="fxVideo" autoplay loop muted playsinline>
+  <source src="${WEBM_URL}" type="video/webm">
+</video>`;
 
-startBtn.addEventListener('click', async ()=>{ startBtn.style.display='none'; log('Activando cámara...'); await startCamera(); });
+/* ---------- iOS PNG sequence ---------- */
+let pngFrames=[], pngIndex=0, pngTimer=null;
+let fxCanvas=null, fxCtx=null;
 
-async function startCamera(){
-  try {
-    videoStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}, audio:true});
-    cam.srcObject = videoStream;
-    await cam.play();
-    streaming = true;
-    resizeCanvas();
-    initWorker();
-    scheduleFrame();
-  } catch(e){ alert('Error al abrir la cámara: ' + e.message); console.error(e); }
+function preloadPNG(){
+  if (pngFrames.length) return;
+  for(let i=1;i<=PNG_COUNT;i++){
+    const img=new Image();
+    img.src=PNG_PATH+`frame_${String(i).padStart(4,'0')}.png`;
+    pngFrames.push(img);
+  }
 }
 
-function resizeCanvas(){
-  overlay.width = cam.videoWidth; overlay.height = cam.videoHeight;
-  overlay.style.width = cam.clientWidth + 'px'; overlay.style.height = cam.clientHeight + 'px';
-  procW = Math.max(1, Math.floor(cam.videoWidth * RES_SCALE));
-  procH = Math.max(1, Math.floor(cam.videoHeight * RES_SCALE));
-  try { offscreenForTransfer = new OffscreenCanvas(procW, procH); } catch(e) { const c = document.createElement('canvas'); c.width = procW; c.height = procH; offscreenForTransfer = c; }
+function startPNG(size){
+  if(!fxCanvas){
+    fxCanvas=document.createElement('canvas');
+    fxCtx=fxCanvas.getContext('2d');
+    overlayContainer.innerHTML='';
+    overlayContainer.appendChild(fxCanvas);
+  }
+  fxCanvas.width=size;
+  fxCanvas.height=size;
+
+  if(pngTimer) return;
+  pngTimer=setInterval(()=>{
+    fxCtx.clearRect(0,0,size,size);
+    const img=pngFrames[pngIndex];
+    if(img && img.complete){
+      fxCtx.drawImage(img,0,0,size,size);
+    }
+    pngIndex=(pngIndex+1)%PNG_COUNT;
+  },1000/PNG_FPS);
 }
 
-/* worker init */
+function stopPNG(){
+  if(pngTimer){clearInterval(pngTimer);pngTimer=null;}
+  pngIndex=0;
+}
+
+/* ---------- Overlay ---------- */
+function showOverlay(){
+  const size=Math.min(innerWidth,innerHeight)*0.6;
+  overlayContainer.style.display='block';
+  overlayContainer.style.width=size+'px';
+  overlayContainer.style.height=size+'px';
+
+  if(IS_IOS){
+    preloadPNG();
+    startPNG(size);
+  }else{
+    if(!document.getElementById('fxVideo')){
+      overlayContainer.innerHTML=videoMarkup;
+    }
+    const v=document.getElementById('fxVideo');
+    try{v.play();}catch(e){}
+  }
+}
+
+function hideOverlay(){
+  overlayContainer.style.display='none';
+  stopPNG();
+}
+
+/* ---------- Camera ---------- */
+startBtn.onclick=async()=>{
+  startBtn.style.display='none';
+  const stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:'environment'},audio:false
+  });
+  cam.srcObject=stream;
+  await cam.play();
+  streaming=true;
+  resize();
+  initWorker();
+  loop();
+};
+
+function resize(){
+  procW=Math.floor(cam.videoWidth*RES_SCALE);
+  procH=Math.floor(cam.videoHeight*RES_SCALE);
+  offscreen=new OffscreenCanvas(procW,procH);
+}
+
+/* ---------- Worker ---------- */
 function initWorker(){
-  if (worker) { worker.terminate(); worker = null; }
-  worker = new Worker('worker.js');
-  worker.onmessage = (ev)=>{
-    const d = ev.data;
-    if (d.type === 'ready'){ log('Worker ready — cargando template...'); worker.postMessage({type:'init', targetUrl: TARGET_URL, procW, procH}); }
-    else if (d.type === 'log'){ console.log('worker:', d.msg); }
-    else if (d.type === 'error'){ console.error('worker error:', d.msg); }
-    else if (d.type === 'templateInfo'){ templW = d.w; templH = d.h; console.log('templ size from worker', templW, templH); }
-    else if (d.type === 'result'){ handleWorkerResult(d); }
+  worker=new Worker('worker.js');
+  worker.onmessage=(e)=>{
+    const d=e.data;
+    if(d.type==='ready'){
+      worker.postMessage({type:'init',targetUrl:TARGET_URL,procW,procH});
+    }
+    if(d.type==='result'){
+      bigMatch.textContent=`Matches:${d.matches} Inliers:${d.inliers}`;
+      if(d.matches>=REQUIRED_MATCHES && d.inliers>=REQUIRED_INLIERS){
+        showOverlay();
+      }else{
+        hideOverlay();
+      }
+    }
   };
 }
 
-/* mapping using video DOM rect (handles object-fit:cover) */
-/* devuelve {dx,dy,dw,dh} en coordenadas de píxeles del frame de vídeo (no pantalla),
-   y mantiene la relación de aspecto del fxVideo (fit contain dentro de la caja objetivo) */
-function mapOverlayScreenToVideoPixels(oRect, vRect, fx){
-  // scale usado por object-fit: cover
-  const scale = Math.max(vRect.width / cam.videoWidth, vRect.height / cam.videoHeight);
-  const displayedW = cam.videoWidth * scale;
-  const displayedH = cam.videoHeight * scale;
-  const offsetX = (displayedW - vRect.width) / 2;
-  const offsetY = (displayedH - vRect.height) / 2;
-
-  const videoLeft = vRect.left + window.scrollX;
-  const videoTop = vRect.top + window.scrollY;
-  const overlayLeft = oRect.left + window.scrollX;
-  const overlayTop = oRect.top + window.scrollY;
-
-  // convertir a coordenadas en el "canvas de video" (píxeles del video source)
-  const dstX = (overlayLeft - videoLeft + offsetX) / scale;
-  const dstY = (overlayTop - videoTop + offsetY) / scale;
-  const dstW = oRect.width / scale;
-  const dstH = oRect.height / scale;
-
-  // preservar aspect ratio del fx (fit contain dentro de dstW x dstH)
-  const fxW = (fx && (fx.videoWidth || fx.clientWidth)) || 1;
-  const fxH = (fx && (fx.videoHeight || fx.clientHeight)) || 1;
-  const fxAspect = fxW / fxH;
-  const boxAspect = dstW / dstH;
-
-  let drawW = dstW, drawH = dstH, offX = 0, offY = 0;
-  if (fxAspect > boxAspect){
-    // fx es proporcionalmente más ancho -> ajustamos por ancho
-    drawW = dstW;
-    drawH = dstW / fxAspect;
-    offY = (dstH - drawH) / 2;
-  } else {
-    // fx es proporcionalmente más alto -> ajustamos por alto
-    drawH = dstH;
-    drawW = dstH * fxAspect;
-    offX = (dstW - drawW) / 2;
-  }
-
-  return { dx: dstX + offX, dy: dstY + offY, dw: drawW, dh: drawH };
+function sendFrame(){
+  const ctx=offscreen.getContext('2d');
+  ctx.drawImage(cam,0,0,procW,procH);
+  const bmp=offscreen.transferToImageBitmap();
+  worker.postMessage({type:'frame',bitmap:bmp},[bmp]);
 }
 
-function handleWorkerResult(d){
-  bigMatch.textContent = `Matches: ${d.matches} | Inliers: ${d.inliers}`;
-
-  if (!d.corners || d.matches < REQUIRED_MATCHES || d.inliers < REQUIRED_INLIERS){
-    hideOverlay();
-    return;
-  }
-
-  const vRect = cam.getBoundingClientRect();
-
-  const cx_proc = (d.corners[0] + d.corners[2] + d.corners[4] + d.corners[6]) / 4.0;
-  const cy_proc = (d.corners[1] + d.corners[3] + d.corners[5] + d.corners[7]) / 4.0;
-
-  const scaleX_video = vRect.width / cam.videoWidth;
-  const scaleY_video = vRect.height / cam.videoHeight;
-  const videoLeft = vRect.left + window.scrollX;
-  const videoTop = vRect.top + window.scrollY;
-
-  const cx_screen = videoLeft + cx_proc * (Math.max(vRect.width / cam.videoWidth, vRect.height / cam.videoHeight) * (cam.videoWidth / cam.videoWidth));
-  const cy_screen = videoTop + cy_proc * (Math.max(vRect.width / cam.videoWidth, vRect.height / cam.videoHeight) * (cam.videoHeight / cam.videoHeight));
-
-  const screenCenterX = window.scrollX + (window.innerWidth / 2);
-  const screenCenterY = window.scrollY + (window.innerHeight / 2);
-
-  const dx = cx_screen - screenCenterX;
-  const dy = cy_screen - screenCenterY;
-  const diag = Math.hypot(window.innerWidth, window.innerHeight);
-  const distNorm = Math.hypot(dx, dy) / diag;
-
-  if (distNorm > CENTROID_THRESHOLD){ hideOverlay(); return; }
-
-  const sizePx = Math.round(Math.min(window.innerWidth * 0.6, window.innerHeight * 0.6));
-  showOverlayCenteredFixed(sizePx);
+function loop(){
+  if(!streaming) return;
+  frameCounter=(frameCounter+1)%FRAME_SKIP;
+  if(frameCounter===0) sendFrame();
+  requestAnimationFrame(loop);
 }
-
-/* send frame to worker */
-async function sendFrameToWorker(){
-  if (!streaming || !worker) return;
-  const newW = Math.max(1, Math.floor(cam.videoWidth * RES_SCALE));
-  const newH = Math.max(1, Math.floor(cam.videoHeight * RES_SCALE));
-  if (newW !== procW || newH !== procH){ procW = newW; procH = newH; resizeCanvas(); worker.postMessage({type:'resize', procW, procH}); }
-
-  try {
-    const ctx2 = offscreenForTransfer.getContext('2d');
-    ctx2.drawImage(cam, 0, 0, procW, procH);
-    let bitmap;
-    if (offscreenForTransfer.transferToImageBitmap){
-      bitmap = offscreenForTransfer.transferToImageBitmap();
-    } else {
-      const blob = await new Promise(r=> offscreenForTransfer.toBlob(r,'image/png'));
-      bitmap = await createImageBitmap(blob);
-    }
-    worker.postMessage({type:'frame', bitmap: bitmap}, [bitmap]);
-  } catch(err){
-    console.error('sendFrameToWorker err', err);
-  }
-}
-
-/* scheduling */
-function scheduleFrame(){
-  if (!streaming) return;
-  frameCounter = (frameCounter + 1) % FRAME_SKIP;
-  if (cam.requestVideoFrameCallback){
-    cam.requestVideoFrameCallback(()=>{ if (frameCounter===0) sendFrameToWorker(); scheduleFrame(); });
-  } else {
-    requestAnimationFrame(()=>{ if (frameCounter===0) sendFrameToWorker(); scheduleFrame(); });
-  }
-}
-
-/* cleanup */
-window.addEventListener('pagehide', ()=>{
-  try{ if (worker) worker.terminate(); }catch(e){}
-  try{ const s = cam.srcObject; if (s) s.getTracks().forEach(t=>t.stop()); }catch(e){}
-});
-
-/* ---------------------------
-   FOTO / GRABACIÓN (UI)
-   --------------------------- */
-
-const shutter = document.getElementById('shutter');
-const shutterInner = document.querySelector('.shutterInner');
-const progressCircle = document.querySelector('.progressRing .progress');
-const recDot = document.querySelector('.recDot');
-
-let holdTimer = null;
-let isRecording = false;
-let mediaRecorder = null;
-let recordedChunks = [];
-const HOLD_TO_RECORD_MS = 400; // tiempo para iniciar grabación
-const MAX_RECORD_MS = 60 * 1000; // 1 min
-let recordTimeout = null;
-
-/* NEW: resources para grabación compuesta */
-let recordingCanvas = null;
-let recordingCtx = null;
-let recordingRAF = null;
-let recordingCanvasStream = null;
-let combinedStream = null;
-
-function downloadBlob(blob, filename){
-  const a = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  a.href = url; a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 5000);
-}
-
-/* FOTO: Reemplazo takePhoto para incluir el overlay (fxVideo) y mantener aspect ratio */
-async function takePhoto(){
-  if (!streaming) { console.warn('no stream'); return; }
-  const w = cam.videoWidth, h = cam.videoHeight;
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const cx = c.getContext('2d');
-
-  // 1) dibujar frame de cámara (frame completo en resolución de video)
-  try { cx.drawImage(cam, 0, 0, w, h); } catch(e){ console.warn('drawImage(cam) failed', e); }
-
-  // 2) si existe fxVideo y está visible, dibujar la animación en la posición correcta (sin estirar)
-  const fx = document.getElementById('fxVideo');
-  if (fx && overlayContainer.style.display !== 'none'){
-    const vRect = cam.getBoundingClientRect();
-    const oRect = overlayContainer.getBoundingClientRect();
-    const mapped = mapOverlayScreenToVideoPixels(oRect, vRect, fx);
-    try {
-      cx.drawImage(fx,
-        0, 0, fx.videoWidth || fx.clientWidth, fx.videoHeight || fx.clientHeight,
-        mapped.dx, mapped.dy, mapped.dw, mapped.dh
-      );
-    } catch(e){
-      console.warn('error dibujando fxVideo en canvas', e);
-    }
-  }
-
-  // 3) exportar
-  c.toBlob((blob)=>{
-    if (!blob) return;
-    const ts = Date.now();
-    downloadBlob(blob, `foto_ar_${ts}.png`);
-  }, 'image/png');
-}
-
-/* Preferir mp4; si no está disponible, usar webm (para init con videoStream original) */
-function initMediaRecorder(){
-  if (!videoStream) { console.warn('mediaStream no disponible'); return null; }
-  let mr = null;
-  // prefer mp4
-  const tryTypes = [
-    'video/mp4;codecs="avc1.42E01E"',
-    'video/mp4',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm'
-  ];
-  for (const t of tryTypes){
-    try {
-      if (!MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(t)){
-        mr = new MediaRecorder(videoStream, t ? { mimeType: t } : undefined);
-        console.log('MediaRecorder init type=', t);
-        return mr;
-      }
-    } catch(e){
-      console.warn('MediaRecorder try failed for', t, e);
-      mr = null;
-    }
-  }
-  // último intento sin opciones
-  try {
-    mr = new MediaRecorder(videoStream);
-    return mr;
-  } catch(e){ console.error('MediaRecorder not supported', e); return null; }
-}
-
-/* NEW: inicializar MediaRecorder con un stream arbitrario (ej. combinedStream) */
-function initMediaRecorderWithStream(stream){
-  if (!stream) return null;
-  let mr = null;
-  const tryTypes = [
-    'video/mp4;codecs="avc1.42E01E"',
-    'video/mp4',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm'
-  ];
-  for (const t of tryTypes){
-    try {
-      if (!MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(t)){
-        mr = new MediaRecorder(stream, t ? { mimeType: t } : undefined);
-        console.log('MediaRecorder init type=', t);
-        return mr;
-      }
-    } catch(e){
-      console.warn('MediaRecorder try failed for', t, e);
-      mr = null;
-    }
-  }
-  try {
-    mr = new MediaRecorder(stream);
-    return mr;
-  } catch(e){ console.error('MediaRecorder not supported', e); return null; }
-}
-
-/* NEW: startRecording/stopRecording que usan canvas.captureStream() + audio,
-   y mantienen la forma del fx al dibujarlo (mapOverlayScreenToVideoPixels) */
-async function startRecording(){
-  if (!videoStream) { console.warn('mediaStream no disponible'); return; }
-  if (isRecording) return;
-
-  // canvas para componer
-  recordingCanvas = document.createElement('canvas');
-  recordingCanvas.width = cam.videoWidth || 640;
-  recordingCanvas.height = cam.videoHeight || 480;
-  recordingCtx = recordingCanvas.getContext('2d');
-
-  // dibujado: cámara + efecto si existe (con mapeo que preserva aspecto)
-  const fx = document.getElementById('fxVideo');
-
-  function drawFrame(){
-    // 1) dibujar cámara full frame
-    try {
-      recordingCtx.drawImage(cam, 0, 0, recordingCanvas.width, recordingCanvas.height);
-    } catch(e){ /* puede fallar si cam no lista */ }
-
-    // 2) dibujar fxVideo si visible y mantener aspecto
-    if (fx && overlayContainer.style.display !== 'none'){
-      const vRect = cam.getBoundingClientRect();
-      const oRect = overlayContainer.getBoundingClientRect();
-      const mapped = mapOverlayScreenToVideoPixels(oRect, vRect, fx);
-      try {
-        recordingCtx.drawImage(fx,
-          0, 0, fx.videoWidth || fx.clientWidth, fx.videoHeight || fx.clientHeight,
-          mapped.dx, mapped.dy, mapped.dw, mapped.dh
-        );
-      } catch(e){
-        // drawImage puede lanzar si fxVideo no tiene contenido por CORS o por estado
-      }
-    }
-
-    recordingRAF = requestAnimationFrame(drawFrame);
-  }
-
-  drawFrame();
-
-  // capturar stream del canvas
-  const fps = 30;
-  recordingCanvasStream = recordingCanvas.captureStream(fps);
-
-  // combinar con audio existente (si existe)
-  const audioTracks = (videoStream.getAudioTracks && videoStream.getAudioTracks()) ? videoStream.getAudioTracks() : [];
-  combinedStream = new MediaStream();
-  // añadir pistas de video del canvas
-  recordingCanvasStream.getVideoTracks().forEach(t=> combinedStream.addTrack(t));
-  // añadir audio
-  audioTracks.forEach(t=> combinedStream.addTrack(t));
-
-  // crear MediaRecorder sobre combinedStream
-  try {
-    mediaRecorder = initMediaRecorderWithStream(combinedStream);
-    if (!mediaRecorder){ log('grabación no soportada en este navegador'); cleanupRecordingResources(); return; }
-  } catch(e){
-    console.error('init mediaRecorder combined failed', e); cleanupRecordingResources(); return;
-  }
-
-  recordedChunks = [];
-  mediaRecorder.ondataavailable = (e)=>{ if (e.data && e.data.size) recordedChunks.push(e.data); };
-  mediaRecorder.onstop = ()=> {
-    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
-    const ts = Date.now();
-    let ext = 'webm';
-    if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('mp4')) ext = 'mp4';
-    else if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('webm')) ext = 'webm';
-    downloadBlob(blob, `video_ar_${ts}.${ext}`);
-    recordedChunks = [];
-    isRecording = false;
-    shutter.classList.remove('recording');
-    recDot.style.display = 'none';
-    log('Grabación finalizada');
-    cleanupRecordingResources();
-  };
-
-  mediaRecorder.start(200);
-  isRecording = true;
-  shutter.classList.add('recording');
-  recDot.style.display = 'block';
-  log('Grabando...');
-  recordTimeout = setTimeout(()=>{ if (isRecording) stopRecording(); }, MAX_RECORD_MS);
-}
-
-function stopRecording(){
-  if (!isRecording || !mediaRecorder) return;
-  try { mediaRecorder.stop(); } catch(e){ console.warn(e); }
-  if (recordTimeout){ clearTimeout(recordTimeout); recordTimeout = null; }
-}
-
-/* NEW: limpiar recursos de grabación (canvas, streams, RAF) */
-function cleanupRecordingResources(){
-  if (recordingRAF) { cancelAnimationFrame(recordingRAF); recordingRAF = null; }
-  try{ if (recordingCanvasStream){ recordingCanvasStream.getTracks().forEach(t=>t.stop()); recordingCanvasStream = null; } }catch(e){}
-  recordingCtx = null;
-  recordingCanvas = null;
-  combinedStream = null;
-}
-
-/* progreso y eventos para hold->record */
-function setProgress(p){ const dash = 283 * (1 - Math.max(0, Math.min(1, p))); progressCircle.style.strokeDashoffset = String(dash); }
-
-let progressRAF = null;
-let holdStartTime = 0;
-
-function onPressStart(evt){
-  evt.preventDefault();
-  holdStartTime = performance.now();
-  setProgress(1);
-  const start = holdStartTime;
-  function tick(){
-    const now = performance.now();
-    const elapsed = now - start;
-    const p = Math.max(0, 1 - (elapsed / HOLD_TO_RECORD_MS));
-    setProgress(p);
-    if (elapsed >= HOLD_TO_RECORD_MS){
-      setProgress(0);
-      startRecording();
-      cancelHoldAnim();
-    } else {
-      progressRAF = requestAnimationFrame(tick);
-    }
-  }
-  progressRAF = requestAnimationFrame(tick);
-}
-
-function cancelHoldAnim(){
-  if (progressRAF) cancelAnimationFrame(progressRAF);
-  progressRAF = null;
-  setProgress(1);
-}
-
-function onPressEnd(evt){
-  evt.preventDefault();
-  const dt = performance.now() - holdStartTime;
-  cancelHoldAnim();
-  if (isRecording){
-    stopRecording();
-  } else {
-    if (dt < HOLD_TO_RECORD_MS + 60){
-      shutterInner.style.transform = 'scale(0.95)';
-      setTimeout(()=> shutterInner.style.transform = '', 90);
-      takePhoto();
-      log('Foto tomada');
-    } else {
-      stopRecording();
-    }
-  }
-  holdStartTime = 0;
-}
-
-/* attach events */
-(function attachShutterEvents(){
-  shutter.addEventListener('mousedown', (e)=> onPressStart(e));
-  document.addEventListener('mouseup', (e)=> onPressEnd(e));
-  shutter.addEventListener('touchstart', (e)=> onPressStart(e), {passive:false});
-  shutter.addEventListener('touchend', (e)=> onPressEnd(e), {passive:false});
-  shutter.addEventListener('touchcancel', (e)=> onPressEnd(e), {passive:false});
-})();
-
 </script>
+
 </body>
 </html>
