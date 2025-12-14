@@ -1,21 +1,20 @@
 <!doctype html>
 <html lang="es">
 <head>
-<meta charset="utf-8" />
+<meta charset="utf-8"/>
 <title>AR Camiseta</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 
 <style>
-html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
-#videoWrapper{position:fixed;inset:0;overflow:hidden}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Arial}
+#videoWrapper{position:fixed;inset:0}
 #cam{width:100%;height:100%;object-fit:cover}
-canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
 #overlayContainer{
   position:fixed;
   left:50%;top:50%;
   transform:translate(-50%,-50%);
   pointer-events:none;
-  z-index:9999;
+  z-index:9;
   display:none;
 }
 #overlayContainer video,
@@ -28,17 +27,36 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
 #startBtn{
   position:fixed;left:50%;top:50%;
   transform:translate(-50%,-50%);
-  padding:14px 18px;
+  padding:14px 20px;
   font-size:18px;
   border:none;border-radius:10px;
   background:#ff4fa8;color:#fff;
-  z-index:10000;
+  z-index:10;
 }
-#bigMatch{
-  position:fixed;left:10px;top:10px;
-  z-index:10000;font-size:14px;
-  background:rgba(0,0,0,0.5);
-  padding:6px 8px;border-radius:6px;
+#captureBtn{
+  position:fixed;
+  bottom:28px;
+  left:50%;
+  transform:translateX(-50%);
+  width:78px;height:78px;
+  border-radius:50%;
+  background:#fff;
+  border:6px solid rgba(255,255,255,.6);
+  z-index:10;
+  touch-action:none;
+  display:none;
+}
+#captureBtn.recording{
+  background:#ff3b30;
+  border-color:#ff3b30;
+  transform:translateX(-50%) scale(1.15);
+}
+#captureBtn::after{
+  content:'';
+  position:absolute;
+  inset:10px;
+  border-radius:50%;
+  background:rgba(0,0,0,.05);
 }
 </style>
 </head>
@@ -47,26 +65,22 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
 
 <div id="videoWrapper">
   <video id="cam" autoplay playsinline muted></video>
-  <canvas id="overlay"></canvas>
 </div>
 
 <div id="overlayContainer"></div>
 
 <button id="startBtn">Activar AR</button>
-<div id="bigMatch">Match: --</div>
+<button id="captureBtn"></button>
 
 <script>
 /* ================= CONFIG ================= */
 const TARGET_URL = './skeleton.png';
 const WEBM_URL   = './skeleton.webm';
-
-const PNG_PATH  = './assets/anim_png/';
-const PNG_COUNT = 8;
-const PNG_FPS   = 8;
-
+const PNG_PATH   = './assets/anim_png/';
+const PNG_COUNT  = 8;
+const PNG_FPS    = 8;
 const REQUIRED_MATCHES = 10;
 const REQUIRED_INLIERS = 8;
-
 const MIN_OVERLAY_SCALE = 0.35;
 const MAX_OVERLAY_SCALE = 0.85;
 /* ========================================= */
@@ -74,7 +88,7 @@ const MAX_OVERLAY_SCALE = 0.85;
 const cam = document.getElementById('cam');
 const overlayContainer = document.getElementById('overlayContainer');
 const startBtn = document.getElementById('startBtn');
-const bigMatch = document.getElementById('bigMatch');
+const captureBtn = document.getElementById('captureBtn');
 
 let worker=null, streaming=false;
 let procW=1, procH=1;
@@ -82,113 +96,64 @@ let offscreen;
 let frameCounter=0;
 let RES_SCALE=0.7, FRAME_SKIP=2;
 
-let currentPNGFrameIndex = 0;
-
 /* ---------- iOS detection ---------- */
-function isIOS(){
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-const IS_IOS = isIOS();
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+(navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
 
-/* ---------- ANDROID: WebM ---------- */
+/* ---------- Overlay animation ---------- */
 const overlayVideoMarkup = () => `
 <video id="fxVideo" autoplay loop muted playsinline>
   <source src="${WEBM_URL}" type="video/webm">
 </video>`;
 
-/* ---------- iOS: PNG sequence (RAF SAFE) ---------- */
-let pngFrames=[], pngIdx=0;
-let fxCanvas=null, fxCtx=null;
-let pngPlaying=false;
-let lastTS=0, acc=0;
-const PNG_FRAME_TIME = 1000 / PNG_FPS;
+let pngFrames=[], pngIdx=0, fxCanvas=null, fxCtx=null;
+let pngPlaying=false, lastTS=0, acc=0;
+const PNG_FRAME_TIME=1000/PNG_FPS;
 
 function preloadPNGs(){
   if(pngFrames.length) return;
   for(let i=1;i<=PNG_COUNT;i++){
     const img=new Image();
-    img.src = PNG_PATH + `frame_${String(i).padStart(4,'0')}.png`;
+    img.src=PNG_PATH+`frame_${String(i).padStart(4,'0')}.png`;
     pngFrames.push(img);
   }
 }
 
 function pngLoop(ts){
   if(!pngPlaying) return;
-  if(!lastTS) lastTS = ts;
-  const delta = ts - lastTS;
-  lastTS = ts;
-  acc += delta;
-
-  if(acc >= PNG_FRAME_TIME){
-    acc -= PNG_FRAME_TIME;
-    pngIdx = (pngIdx + 1) % PNG_COUNT;
-    currentPNGFrameIndex = pngIdx;
-  }
-
-  drawPNGFrame();
-  requestAnimationFrame(pngLoop);
-}
-
-function drawPNGFrame(){
-  if(!fxCtx) return;
+  if(!lastTS) lastTS=ts;
+  acc+=ts-lastTS; lastTS=ts;
+  if(acc>=PNG_FRAME_TIME){ acc=0; pngIdx=(pngIdx+1)%PNG_COUNT; }
   fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
-  const img = pngFrames[pngIdx];
-  if(img && img.complete){
-    fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
-  }
-}
-
-function startPNG(size){
-  if(!fxCanvas){
-    fxCanvas = document.createElement('canvas');
-    fxCtx = fxCanvas.getContext('2d');
-    overlayContainer.innerHTML='';
-    overlayContainer.appendChild(fxCanvas);
-  }
-  fxCanvas.width = size;
-  fxCanvas.height = size;
-
-  if(pngPlaying) return;
-  pngPlaying = true;
-  lastTS = 0; acc = 0;
+  const img=pngFrames[pngIdx];
+  if(img?.complete) fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
   requestAnimationFrame(pngLoop);
 }
 
-function stopPNG(){
-  pngPlaying = false;
-  pngIdx = 0;
-  acc = 0;
-}
-
-/* ---------- overlay ---------- */
-function showOverlay(sizePx){
+function showOverlay(size){
   overlayContainer.style.display='block';
-  overlayContainer.style.width=sizePx+'px';
-  overlayContainer.style.height=sizePx+'px';
-
+  overlayContainer.style.width=size+'px';
+  overlayContainer.style.height=size+'px';
+  overlayContainer.innerHTML='';
   if(IS_IOS){
     preloadPNGs();
-    startPNG(sizePx);
+    fxCanvas=document.createElement('canvas');
+    fxCanvas.width=size; fxCanvas.height=size;
+    fxCtx=fxCanvas.getContext('2d');
+    overlayContainer.appendChild(fxCanvas);
+    pngPlaying=true; lastTS=0; acc=0;
+    requestAnimationFrame(pngLoop);
   }else{
-    if(!document.getElementById('fxVideo')){
-      overlayContainer.innerHTML=overlayVideoMarkup();
-    }
-    try{document.getElementById('fxVideo').play();}catch(e){}
+    overlayContainer.innerHTML=overlayVideoMarkup();
   }
 }
+function hideOverlay(){ overlayContainer.style.display='none'; pngPlaying=false; }
 
-function hideOverlay(){
-  overlayContainer.style.display='none';
-  stopPNG();
-}
-
-/* ---------- camera ---------- */
+/* ---------- Camera ---------- */
 startBtn.onclick=async()=>{
   startBtn.style.display='none';
-  const stream=await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:'environment'},audio:true
-  });
+  captureBtn.style.display='block';
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:true});
   cam.srcObject=stream;
   await cam.play();
   streaming=true;
@@ -203,30 +168,25 @@ function resize(){
   offscreen=new OffscreenCanvas(procW,procH);
 }
 
-/* ---------- worker ---------- */
+/* ---------- Worker ---------- */
 function initWorker(){
   worker=new Worker('worker.js');
-  worker.onmessage=(e)=>{
+  worker.onmessage=e=>{
     const d=e.data;
-    if(d.type==='ready'){
+    if(d.type==='ready')
       worker.postMessage({type:'init',targetUrl:TARGET_URL,procW,procH});
-    }
     if(d.type==='result'){
-      bigMatch.textContent=`Matches:${d.matches} Inliers:${d.inliers}`;
-      if(d.matches<REQUIRED_MATCHES || d.inliers<REQUIRED_INLIERS || !d.corners){
+      if(d.matches<REQUIRED_MATCHES||d.inliers<REQUIRED_INLIERS||!d.corners){
         hideOverlay(); return;
       }
-
       const dx1=d.corners[2]-d.corners[0];
       const dy1=d.corners[3]-d.corners[1];
       const dx2=d.corners[6]-d.corners[0];
       const dy2=d.corners[7]-d.corners[1];
       const area=Math.abs(dx1*dy2-dy1*dx2);
-      const norm=Math.min(1,Math.max(0,area/(procW*procH)));
+      const norm=Math.min(1,area/(procW*procH));
       const scale=MIN_OVERLAY_SCALE+(MAX_OVERLAY_SCALE-MIN_OVERLAY_SCALE)*norm;
-      const sizePx=Math.round(Math.min(innerWidth,innerHeight)*scale);
-
-      showOverlay(sizePx);
+      showOverlay(Math.round(Math.min(innerWidth,innerHeight)*scale));
     }
   };
 }
@@ -244,6 +204,65 @@ function loop(){
   if(frameCounter===0) sendFrame();
   requestAnimationFrame(loop);
 }
+
+/* ---------- Foto + Video (con overlay) ---------- */
+let pressTimer=null, recorder=null, chunks=[], recording=false;
+
+function compositeCanvas(){
+  const c=document.createElement('canvas');
+  c.width=cam.videoWidth; c.height=cam.videoHeight;
+  const x=c.getContext('2d');
+  x.drawImage(cam,0,0,c.width,c.height);
+  if(overlayContainer.style.display==='block'){
+    const r=overlayContainer.getBoundingClientRect();
+    const scale=c.width/innerWidth;
+    x.drawImage(overlayContainer.firstElementChild,
+      r.left*scale,r.top*scale,r.width*scale,r.height*scale);
+  }
+  return c;
+}
+
+function takePhoto(){
+  const c=compositeCanvas();
+  c.toBlob(b=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b);
+    a.download='foto_ar.png';
+    a.click();
+  });
+}
+
+function startRecording(){
+  const stream=compositeCanvas().captureStream(30);
+  const mime=MediaRecorder.isTypeSupported('video/mp4')
+    ?'video/mp4':'video/webm';
+  recorder=new MediaRecorder(stream,{mimeType:mime});
+  chunks=[];
+  recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  recorder.onstop=()=>{
+    const blob=new Blob(chunks,{type:mime});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`video_ar.${mime.includes('mp4')?'mp4':'webm'}`;
+    a.click();
+  };
+  recorder.start();
+  recording=true;
+  captureBtn.classList.add('recording');
+}
+
+function stopRecording(){
+  if(recorder&&recording) recorder.stop();
+  recording=false;
+  captureBtn.classList.remove('recording');
+}
+
+captureBtn.onpointerdown=()=>pressTimer=setTimeout(startRecording,300);
+captureBtn.onpointerup=()=>{
+  clearTimeout(pressTimer);
+  recording?stopRecording():takePhoto();
+};
+captureBtn.onpointerleave=()=>recording&&stopRecording();
 </script>
 
 </body>
