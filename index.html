@@ -2,14 +2,14 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>AR Camiseta — PNG iOS / WebM Android</title>
+<title>AR Camiseta</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0" />
 
 <style>
 html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
 #videoWrapper{position:fixed;inset:0;overflow:hidden}
 #cam{width:100%;height:100%;object-fit:cover}
-#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
+canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
 #overlayContainer{
   position:fixed;
   left:50%;top:50%;
@@ -51,13 +51,14 @@ html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
 </div>
 
 <div id="overlayContainer"></div>
+
 <button id="startBtn">Activar AR</button>
 <div id="bigMatch">Match: --</div>
 
 <script>
 /* ================= CONFIG ================= */
 const TARGET_URL = './skeleton.png';
-const WEBM_URL  = './skeleton.webm';
+const WEBM_URL   = './skeleton.webm';
 
 const PNG_PATH  = './assets/anim_png/';
 const PNG_COUNT = 8;
@@ -81,7 +82,6 @@ let offscreen;
 let frameCounter=0;
 let RES_SCALE=0.7, FRAME_SKIP=2;
 
-let currentOverlaySizePx = 0;
 let currentPNGFrameIndex = 0;
 
 /* ---------- iOS detection ---------- */
@@ -97,9 +97,12 @@ const overlayVideoMarkup = () => `
   <source src="${WEBM_URL}" type="video/webm">
 </video>`;
 
-/* ---------- iOS: PNG sequence ---------- */
-let pngFrames=[], pngIdx=0, pngTimer=null;
+/* ---------- iOS: PNG sequence (RAF SAFE) ---------- */
+let pngFrames=[], pngIdx=0;
 let fxCanvas=null, fxCtx=null;
+let pngPlaying=false;
+let lastTS=0, acc=0;
+const PNG_FRAME_TIME = 1000 / PNG_FPS;
 
 function preloadPNGs(){
   if(pngFrames.length) return;
@@ -110,36 +113,56 @@ function preloadPNGs(){
   }
 }
 
+function pngLoop(ts){
+  if(!pngPlaying) return;
+  if(!lastTS) lastTS = ts;
+  const delta = ts - lastTS;
+  lastTS = ts;
+  acc += delta;
+
+  if(acc >= PNG_FRAME_TIME){
+    acc -= PNG_FRAME_TIME;
+    pngIdx = (pngIdx + 1) % PNG_COUNT;
+    currentPNGFrameIndex = pngIdx;
+  }
+
+  drawPNGFrame();
+  requestAnimationFrame(pngLoop);
+}
+
+function drawPNGFrame(){
+  if(!fxCtx) return;
+  fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
+  const img = pngFrames[pngIdx];
+  if(img && img.complete){
+    fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
+  }
+}
+
 function startPNG(size){
   if(!fxCanvas){
-    fxCanvas=document.createElement('canvas');
-    fxCtx=fxCanvas.getContext('2d');
+    fxCanvas = document.createElement('canvas');
+    fxCtx = fxCanvas.getContext('2d');
     overlayContainer.innerHTML='';
     overlayContainer.appendChild(fxCanvas);
   }
-  fxCanvas.width=size;
-  fxCanvas.height=size;
+  fxCanvas.width = size;
+  fxCanvas.height = size;
 
-  if(pngTimer) return;
-  pngTimer=setInterval(()=>{
-    fxCtx.clearRect(0,0,size,size);
-    const img=pngFrames[pngIdx];
-    if(img && img.complete){
-      fxCtx.drawImage(img,0,0,size,size);
-      currentPNGFrameIndex = pngIdx;
-    }
-    pngIdx=(pngIdx+1)%PNG_COUNT;
-  },1000/PNG_FPS);
+  if(pngPlaying) return;
+  pngPlaying = true;
+  lastTS = 0; acc = 0;
+  requestAnimationFrame(pngLoop);
 }
 
 function stopPNG(){
-  if(pngTimer){clearInterval(pngTimer);pngTimer=null;}
-  pngIdx=0;
+  pngPlaying = false;
+  pngIdx = 0;
+  acc = 0;
 }
 
 /* ---------- overlay ---------- */
 function showOverlay(sizePx){
-  currentOverlaySizePx = sizePx;
   overlayContainer.style.display='block';
   overlayContainer.style.width=sizePx+'px';
   overlayContainer.style.height=sizePx+'px';
@@ -190,12 +213,10 @@ function initWorker(){
     }
     if(d.type==='result'){
       bigMatch.textContent=`Matches:${d.matches} Inliers:${d.inliers}`;
-
       if(d.matches<REQUIRED_MATCHES || d.inliers<REQUIRED_INLIERS || !d.corners){
         hideOverlay(); return;
       }
 
-      // tamaño según área del marcador
       const dx1=d.corners[2]-d.corners[0];
       const dy1=d.corners[3]-d.corners[1];
       const dx2=d.corners[6]-d.corners[0];
