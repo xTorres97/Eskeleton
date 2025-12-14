@@ -1,46 +1,46 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <title>AR Camiseta</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<meta charset="utf-8" />
+<title>AR Camiseta — PNG iOS / WebM Android</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
 
-  <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
-    #videoWrapper{position:fixed;inset:0;overflow:hidden}
-    #cam{width:100%;height:100%;object-fit:cover}
-    #overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
-    #overlayContainer{
-      position:fixed;left:50%;top:50%;
-      transform:translate(-50%,-50%);
-      pointer-events:none;
-      z-index:9999;
-      display:none;
-      background:transparent;
-    }
-    #overlayContainer video,
-    #overlayContainer canvas{
-      width:100%;
-      height:100%;
-      object-fit:contain;
-      background:transparent;
-    }
-    #startBtn{
-      position:fixed;left:50%;top:50%;
-      transform:translate(-50%,-50%);
-      padding:14px 18px;
-      font-size:18px;
-      border:none;border-radius:10px;
-      background:#ff4fa8;color:#fff;
-      z-index:10000;
-    }
-    #bigMatch{
-      position:fixed;left:10px;top:10px;
-      z-index:10000;font-size:14px;
-      background:rgba(0,0,0,0.5);
-      padding:6px 8px;border-radius:6px;
-    }
-  </style>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
+#videoWrapper{position:fixed;inset:0;overflow:hidden}
+#cam{width:100%;height:100%;object-fit:cover}
+#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
+#overlayContainer{
+  position:fixed;
+  left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+  z-index:9999;
+  display:none;
+}
+#overlayContainer video,
+#overlayContainer canvas{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  background:transparent;
+}
+#startBtn{
+  position:fixed;left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  padding:14px 18px;
+  font-size:18px;
+  border:none;border-radius:10px;
+  background:#ff4fa8;color:#fff;
+  z-index:10000;
+}
+#bigMatch{
+  position:fixed;left:10px;top:10px;
+  z-index:10000;font-size:14px;
+  background:rgba(0,0,0,0.5);
+  padding:6px 8px;border-radius:6px;
+}
+</style>
 </head>
 
 <body>
@@ -51,7 +51,6 @@
 </div>
 
 <div id="overlayContainer"></div>
-
 <button id="startBtn">Activar AR</button>
 <div id="bigMatch">Match: --</div>
 
@@ -60,13 +59,15 @@
 const TARGET_URL = './skeleton.png';
 const WEBM_URL  = './skeleton.webm';
 
-// PNG sequence (iOS)
 const PNG_PATH  = './assets/anim_png/';
 const PNG_COUNT = 8;
-const PNG_FPS   = 12;
+const PNG_FPS   = 8;
 
 const REQUIRED_MATCHES = 10;
 const REQUIRED_INLIERS = 8;
+
+const MIN_OVERLAY_SCALE = 0.35;
+const MAX_OVERLAY_SCALE = 0.85;
 /* ========================================= */
 
 const cam = document.getElementById('cam');
@@ -74,11 +75,14 @@ const overlayContainer = document.getElementById('overlayContainer');
 const startBtn = document.getElementById('startBtn');
 const bigMatch = document.getElementById('bigMatch');
 
-let worker, streaming=false;
+let worker=null, streaming=false;
 let procW=1, procH=1;
 let offscreen;
 let frameCounter=0;
 let RES_SCALE=0.7, FRAME_SKIP=2;
+
+let currentOverlaySizePx = 0;
+let currentPNGFrameIndex = 0;
 
 /* ---------- iOS detection ---------- */
 function isIOS(){
@@ -87,21 +91,21 @@ function isIOS(){
 }
 const IS_IOS = isIOS();
 
-/* ---------- Android video ---------- */
-const videoMarkup = `
+/* ---------- ANDROID: WebM ---------- */
+const overlayVideoMarkup = () => `
 <video id="fxVideo" autoplay loop muted playsinline>
   <source src="${WEBM_URL}" type="video/webm">
 </video>`;
 
-/* ---------- iOS PNG sequence ---------- */
-let pngFrames=[], pngIndex=0, pngTimer=null;
+/* ---------- iOS: PNG sequence ---------- */
+let pngFrames=[], pngIdx=0, pngTimer=null;
 let fxCanvas=null, fxCtx=null;
 
-function preloadPNG(){
-  if (pngFrames.length) return;
+function preloadPNGs(){
+  if(pngFrames.length) return;
   for(let i=1;i<=PNG_COUNT;i++){
     const img=new Image();
-    img.src=PNG_PATH+`frame_${String(i).padStart(4,'0')}.png`;
+    img.src = PNG_PATH + `frame_${String(i).padStart(4,'0')}.png`;
     pngFrames.push(img);
   }
 }
@@ -119,35 +123,35 @@ function startPNG(size){
   if(pngTimer) return;
   pngTimer=setInterval(()=>{
     fxCtx.clearRect(0,0,size,size);
-    const img=pngFrames[pngIndex];
+    const img=pngFrames[pngIdx];
     if(img && img.complete){
       fxCtx.drawImage(img,0,0,size,size);
+      currentPNGFrameIndex = pngIdx;
     }
-    pngIndex=(pngIndex+1)%PNG_COUNT;
+    pngIdx=(pngIdx+1)%PNG_COUNT;
   },1000/PNG_FPS);
 }
 
 function stopPNG(){
   if(pngTimer){clearInterval(pngTimer);pngTimer=null;}
-  pngIndex=0;
+  pngIdx=0;
 }
 
-/* ---------- Overlay ---------- */
-function showOverlay(){
-  const size=Math.min(innerWidth,innerHeight)*0.6;
+/* ---------- overlay ---------- */
+function showOverlay(sizePx){
+  currentOverlaySizePx = sizePx;
   overlayContainer.style.display='block';
-  overlayContainer.style.width=size+'px';
-  overlayContainer.style.height=size+'px';
+  overlayContainer.style.width=sizePx+'px';
+  overlayContainer.style.height=sizePx+'px';
 
   if(IS_IOS){
-    preloadPNG();
-    startPNG(size);
+    preloadPNGs();
+    startPNG(sizePx);
   }else{
     if(!document.getElementById('fxVideo')){
-      overlayContainer.innerHTML=videoMarkup;
+      overlayContainer.innerHTML=overlayVideoMarkup();
     }
-    const v=document.getElementById('fxVideo');
-    try{v.play();}catch(e){}
+    try{document.getElementById('fxVideo').play();}catch(e){}
   }
 }
 
@@ -156,11 +160,11 @@ function hideOverlay(){
   stopPNG();
 }
 
-/* ---------- Camera ---------- */
+/* ---------- camera ---------- */
 startBtn.onclick=async()=>{
   startBtn.style.display='none';
   const stream=await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:'environment'},audio:false
+    video:{facingMode:'environment'},audio:true
   });
   cam.srcObject=stream;
   await cam.play();
@@ -176,7 +180,7 @@ function resize(){
   offscreen=new OffscreenCanvas(procW,procH);
 }
 
-/* ---------- Worker ---------- */
+/* ---------- worker ---------- */
 function initWorker(){
   worker=new Worker('worker.js');
   worker.onmessage=(e)=>{
@@ -186,11 +190,22 @@ function initWorker(){
     }
     if(d.type==='result'){
       bigMatch.textContent=`Matches:${d.matches} Inliers:${d.inliers}`;
-      if(d.matches>=REQUIRED_MATCHES && d.inliers>=REQUIRED_INLIERS){
-        showOverlay();
-      }else{
-        hideOverlay();
+
+      if(d.matches<REQUIRED_MATCHES || d.inliers<REQUIRED_INLIERS || !d.corners){
+        hideOverlay(); return;
       }
+
+      // tamaño según área del marcador
+      const dx1=d.corners[2]-d.corners[0];
+      const dy1=d.corners[3]-d.corners[1];
+      const dx2=d.corners[6]-d.corners[0];
+      const dy2=d.corners[7]-d.corners[1];
+      const area=Math.abs(dx1*dy2-dy1*dx2);
+      const norm=Math.min(1,Math.max(0,area/(procW*procH)));
+      const scale=MIN_OVERLAY_SCALE+(MAX_OVERLAY_SCALE-MIN_OVERLAY_SCALE)*norm;
+      const sizePx=Math.round(Math.min(innerWidth,innerHeight)*scale);
+
+      showOverlay(sizePx);
     }
   };
 }
