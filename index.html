@@ -11,45 +11,34 @@ html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
 #cam{width:100%;height:100%;object-fit:cover}
 canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
 #overlayContainer{
-  position:fixed;left:50%;top:50%;
+  position:fixed;
+  left:50%;top:50%;
   transform:translate(-50%,-50%);
-  pointer-events:none;z-index:9999;display:none;
+  pointer-events:none;
+  z-index:9999;
+  display:none;
 }
 #overlayContainer video,
 #overlayContainer canvas{
-  width:100%;height:100%;object-fit:contain;background:transparent;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  background:transparent;
 }
 #startBtn{
   position:fixed;left:50%;top:50%;
   transform:translate(-50%,-50%);
-  padding:14px 18px;font-size:18px;
+  padding:14px 18px;
+  font-size:18px;
   border:none;border-radius:10px;
-  background:#ff4fa8;color:#fff;z-index:10000;
+  background:#ff4fa8;color:#fff;
+  z-index:10000;
 }
 #bigMatch{
   position:fixed;left:10px;top:10px;
   z-index:10000;font-size:14px;
   background:rgba(0,0,0,0.5);
   padding:6px 8px;border-radius:6px;
-}
-
-/* Camera button */
-.cameraBar{
-  position:fixed;left:50%;bottom:22px;
-  transform:translateX(-50%);
-  z-index:12000;
-}
-.shutterBtn{
-  width:84px;height:84px;border-radius:50%;
-  background:#ff4fa8;border:6px solid rgba(255,255,255,.2);
-  display:flex;align-items:center;justify-content:center;
-}
-.shutterInner{
-  width:60px;height:60px;border-radius:50%;
-  background:#fff;
-}
-.recording .shutterInner{
-  background:#000;border-radius:12px;
 }
 </style>
 </head>
@@ -65,12 +54,6 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
 
 <button id="startBtn">Activar AR</button>
 <div id="bigMatch">Match: --</div>
-
-<div class="cameraBar">
-  <div id="shutter" class="shutterBtn">
-    <div class="shutterInner"></div>
-  </div>
-</div>
 
 <script>
 /* ================= CONFIG ================= */
@@ -92,7 +75,6 @@ const cam = document.getElementById('cam');
 const overlayContainer = document.getElementById('overlayContainer');
 const startBtn = document.getElementById('startBtn');
 const bigMatch = document.getElementById('bigMatch');
-const shutter = document.getElementById('shutter');
 
 let worker=null, streaming=false;
 let procW=1, procH=1;
@@ -100,8 +82,7 @@ let offscreen;
 let frameCounter=0;
 let RES_SCALE=0.7, FRAME_SKIP=2;
 
-let mediaRecorder=null, recordedChunks=[];
-let isRecording=false, holdTimer=null;
+let currentPNGFrameIndex = 0;
 
 /* ---------- iOS detection ---------- */
 function isIOS(){
@@ -110,65 +91,99 @@ function isIOS(){
 }
 const IS_IOS = isIOS();
 
-/* ---------- PNG sequence (RAF-safe) ---------- */
+/* ---------- ANDROID: WebM ---------- */
+const overlayVideoMarkup = () => `
+<video id="fxVideo" autoplay loop muted playsinline>
+  <source src="${WEBM_URL}" type="video/webm">
+</video>`;
+
+/* ---------- iOS: PNG sequence (RAF SAFE) ---------- */
 let pngFrames=[], pngIdx=0;
 let fxCanvas=null, fxCtx=null;
 let pngPlaying=false;
 let lastTS=0, acc=0;
-const FRAME_TIME=1000/PNG_FPS;
+const PNG_FRAME_TIME = 1000 / PNG_FPS;
 
 function preloadPNGs(){
   if(pngFrames.length) return;
   for(let i=1;i<=PNG_COUNT;i++){
     const img=new Image();
-    img.src=PNG_PATH+`frame_${String(i).padStart(4,'0')}.png`;
+    img.src = PNG_PATH + `frame_${String(i).padStart(4,'0')}.png`;
     pngFrames.push(img);
   }
 }
+
 function pngLoop(ts){
   if(!pngPlaying) return;
-  if(!lastTS) lastTS=ts;
-  acc+=ts-lastTS;
-  lastTS=ts;
-  if(acc>=FRAME_TIME){
-    acc-=FRAME_TIME;
-    pngIdx=(pngIdx+1)%PNG_COUNT;
+  if(!lastTS) lastTS = ts;
+  const delta = ts - lastTS;
+  lastTS = ts;
+  acc += delta;
+
+  if(acc >= PNG_FRAME_TIME){
+    acc -= PNG_FRAME_TIME;
+    pngIdx = (pngIdx + 1) % PNG_COUNT;
+    currentPNGFrameIndex = pngIdx;
   }
+
+  drawPNGFrame();
+  requestAnimationFrame(pngLoop);
+}
+
+function drawPNGFrame(){
+  if(!fxCtx) return;
   fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
-  const img=pngFrames[pngIdx];
+  const img = pngFrames[pngIdx];
   if(img && img.complete){
     fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
   }
-  requestAnimationFrame(pngLoop);
 }
+
 function startPNG(size){
   if(!fxCanvas){
-    fxCanvas=document.createElement('canvas');
-    fxCtx=fxCanvas.getContext('2d');
+    fxCanvas = document.createElement('canvas');
+    fxCtx = fxCanvas.getContext('2d');
     overlayContainer.innerHTML='';
     overlayContainer.appendChild(fxCanvas);
   }
-  fxCanvas.width=size;
-  fxCanvas.height=size;
-  pngPlaying=true;lastTS=0;acc=0;
+  fxCanvas.width = size;
+  fxCanvas.height = size;
+
+  if(pngPlaying) return;
+  pngPlaying = true;
+  lastTS = 0; acc = 0;
   requestAnimationFrame(pngLoop);
 }
-function stopPNG(){ pngPlaying=false; pngIdx=0; }
 
-/* ---------- Overlay ---------- */
-function showOverlay(size){
-  overlayContainer.style.display='block';
-  overlayContainer.style.width=size+'px';
-  overlayContainer.style.height=size+'px';
-  preloadPNGs();
-  startPNG(size);
+function stopPNG(){
+  pngPlaying = false;
+  pngIdx = 0;
+  acc = 0;
 }
+
+/* ---------- overlay ---------- */
+function showOverlay(sizePx){
+  overlayContainer.style.display='block';
+  overlayContainer.style.width=sizePx+'px';
+  overlayContainer.style.height=sizePx+'px';
+
+  if(IS_IOS){
+    preloadPNGs();
+    startPNG(sizePx);
+  }else{
+    if(!document.getElementById('fxVideo')){
+      overlayContainer.innerHTML=overlayVideoMarkup();
+    }
+    try{document.getElementById('fxVideo').play();}catch(e){}
+  }
+}
+
 function hideOverlay(){
   overlayContainer.style.display='none';
   stopPNG();
 }
 
-/* ---------- Camera ---------- */
+/* ---------- camera ---------- */
 startBtn.onclick=async()=>{
   startBtn.style.display='none';
   const stream=await navigator.mediaDevices.getUserMedia({
@@ -181,13 +196,14 @@ startBtn.onclick=async()=>{
   initWorker();
   loop();
 };
+
 function resize(){
   procW=Math.floor(cam.videoWidth*RES_SCALE);
   procH=Math.floor(cam.videoHeight*RES_SCALE);
   offscreen=new OffscreenCanvas(procW,procH);
 }
 
-/* ---------- Worker ---------- */
+/* ---------- worker ---------- */
 function initWorker(){
   worker=new Worker('worker.js');
   worker.onmessage=(e)=>{
@@ -197,102 +213,36 @@ function initWorker(){
     }
     if(d.type==='result'){
       bigMatch.textContent=`Matches:${d.matches} Inliers:${d.inliers}`;
-      if(d.matches<REQUIRED_MATCHES||d.inliers<REQUIRED_INLIERS||!d.corners){
-        hideOverlay();return;
+      if(d.matches<REQUIRED_MATCHES || d.inliers<REQUIRED_INLIERS || !d.corners){
+        hideOverlay(); return;
       }
-      const dx=d.corners[2]-d.corners[0];
-      const dy=d.corners[3]-d.corners[1];
-      const area=Math.abs(dx*dy);
-      const norm=Math.min(1,area/(procW*procH));
+
+      const dx1=d.corners[2]-d.corners[0];
+      const dy1=d.corners[3]-d.corners[1];
+      const dx2=d.corners[6]-d.corners[0];
+      const dy2=d.corners[7]-d.corners[1];
+      const area=Math.abs(dx1*dy2-dy1*dx2);
+      const norm=Math.min(1,Math.max(0,area/(procW*procH)));
       const scale=MIN_OVERLAY_SCALE+(MAX_OVERLAY_SCALE-MIN_OVERLAY_SCALE)*norm;
-      showOverlay(Math.min(innerWidth,innerHeight)*scale);
+      const sizePx=Math.round(Math.min(innerWidth,innerHeight)*scale);
+
+      showOverlay(sizePx);
     }
   };
 }
+
 function sendFrame(){
   const ctx=offscreen.getContext('2d');
   ctx.drawImage(cam,0,0,procW,procH);
   const bmp=offscreen.transferToImageBitmap();
   worker.postMessage({type:'frame',bitmap:bmp},[bmp]);
 }
+
 function loop(){
   if(!streaming) return;
   frameCounter=(frameCounter+1)%FRAME_SKIP;
   if(frameCounter===0) sendFrame();
   requestAnimationFrame(loop);
-}
-
-/* ---------- FOTO / VIDEO ---------- */
-shutter.onmousedown=()=>{
-  holdTimer=setTimeout(startRecording,400);
-};
-shutter.onmouseup=()=>{
-  if(holdTimer){
-    clearTimeout(holdTimer);
-    takePhoto();
-  }
-  if(isRecording) stopRecording();
-};
-
-function takePhoto(){
-  const c=document.createElement('canvas');
-  c.width=cam.videoWidth;
-  c.height=cam.videoHeight;
-  const cx=c.getContext('2d');
-  cx.drawImage(cam,0,0,c.width,c.height);
-  if(fxCanvas){
-    cx.drawImage(fxCanvas,
-      (c.width-fxCanvas.width)/2,
-      (c.height-fxCanvas.height)/2
-    );
-  }
-  c.toBlob(b=>{
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(b);
-    a.download=`foto_ar_${Date.now()}.png`;
-    a.click();
-  });
-}
-
-function startRecording(){
-  isRecording=true;
-  shutter.classList.add('recording');
-
-  const rc=document.createElement('canvas');
-  rc.width=cam.videoWidth;
-  rc.height=cam.videoHeight;
-  const rctx=rc.getContext('2d');
-
-  function draw(){
-    rctx.drawImage(cam,0,0,rc.width,rc.height);
-    if(fxCanvas){
-      rctx.drawImage(fxCanvas,
-        (rc.width-fxCanvas.width)/2,
-        (rc.height-fxCanvas.height)/2
-      );
-    }
-    if(isRecording) requestAnimationFrame(draw);
-  }
-  draw();
-
-  const stream=rc.captureStream(30);
-  mediaRecorder=new MediaRecorder(stream);
-  recordedChunks=[];
-  mediaRecorder.ondataavailable=e=>recordedChunks.push(e.data);
-  mediaRecorder.onstop=()=>{
-    const blob=new Blob(recordedChunks,{type:mediaRecorder.mimeType});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=`video_ar_${Date.now()}.mp4`;
-    a.click();
-  };
-  mediaRecorder.start();
-}
-
-function stopRecording(){
-  isRecording=false;
-  shutter.classList.remove('recording');
-  mediaRecorder.stop();
 }
 </script>
 
