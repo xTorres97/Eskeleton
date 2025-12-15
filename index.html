@@ -6,10 +6,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0" />
 
 <style>
-html,body{margin:0;height:100%;background:#000;color:#fff;font-family:Arial}
+html,body{
+  margin:0;height:100%;
+  background:#000;color:#fff;
+  font-family:Arial
+}
 #videoWrapper{position:fixed;inset:0;overflow:hidden}
 #cam{width:100%;height:100%;object-fit:cover}
 canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none}
+
 #overlayContainer{
   position:fixed;
   left:50%;top:50%;
@@ -18,6 +23,7 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
   z-index:9999;
   display:none;
 }
+
 #overlayContainer video,
 #overlayContainer canvas{
   width:100%;
@@ -25,20 +31,47 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
   object-fit:contain;
   background:transparent;
 }
+
 #startBtn{
-  position:fixed;left:50%;top:50%;
+  position:fixed;
+  left:50%;top:50%;
   transform:translate(-50%,-50%);
   padding:14px 18px;
   font-size:18px;
-  border:none;border-radius:10px;
-  background:#ff4fa8;color:#fff;
+  border:none;
+  border-radius:10px;
+  background:#ff4fa8;
+  color:#fff;
   z-index:10000;
 }
-#bigMatch{
-  position:fixed;left:10px;top:10px;
-  z-index:10000;font-size:14px;
-  background:rgba(0,0,0,0.5);
-  padding:6px 8px;border-radius:6px;
+
+/* BOTÓN CÁMARA */
+#captureBtn{
+  position:fixed;
+  bottom:30px;
+  left:50%;
+  transform:translateX(-50%);
+  width:74px;
+  height:74px;
+  border-radius:50%;
+  background:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:10001;
+}
+
+#captureBtn .inner{
+  width:62px;
+  height:62px;
+  border-radius:50%;
+  background:#ff4fa8;
+  transition:transform .15s, background .15s;
+}
+
+#captureBtn.recording .inner{
+  transform:scale(0.8);
+  background:#ff0000;
 }
 </style>
 </head>
@@ -52,7 +85,13 @@ canvas#overlay{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events
 
 <div id="overlayContainer"></div>
 
+<canvas id="finalCanvas" style="display:none"></canvas>
+
 <button id="startBtn">Activar AR</button>
+
+<div id="captureBtn" style="display:none">
+  <div class="inner"></div>
+</div>
 
 <script>
 /* ================= CONFIG ================= */
@@ -73,7 +112,10 @@ const MAX_OVERLAY_SCALE = 0.85;
 const cam = document.getElementById('cam');
 const overlayContainer = document.getElementById('overlayContainer');
 const startBtn = document.getElementById('startBtn');
-const bigMatch = document.getElementById('bigMatch');
+const captureBtn = document.getElementById('captureBtn');
+
+const finalCanvas = document.getElementById('finalCanvas');
+const finalCtx = finalCanvas.getContext('2d');
 
 let worker=null, streaming=false;
 let procW=1, procH=1;
@@ -81,7 +123,9 @@ let offscreen;
 let frameCounter=0;
 let RES_SCALE=0.7, FRAME_SKIP=2;
 
-let currentPNGFrameIndex = 0;
+let recording=false;
+let mediaRecorder;
+let recordedChunks=[];
 
 /* ---------- iOS detection ---------- */
 function isIOS(){
@@ -90,13 +134,13 @@ function isIOS(){
 }
 const IS_IOS = isIOS();
 
-/* ---------- ANDROID: WebM ---------- */
+/* ---------- overlay ---------- */
 const overlayVideoMarkup = () => `
 <video id="fxVideo" autoplay loop muted playsinline>
   <source src="${WEBM_URL}" type="video/webm">
 </video>`;
 
-/* ---------- iOS: PNG sequence (RAF SAFE) ---------- */
+/* ---------- PNG animation (iOS) ---------- */
 let pngFrames=[], pngIdx=0;
 let fxCanvas=null, fxCtx=null;
 let pngPlaying=false;
@@ -122,20 +166,14 @@ function pngLoop(ts){
   if(acc >= PNG_FRAME_TIME){
     acc -= PNG_FRAME_TIME;
     pngIdx = (pngIdx + 1) % PNG_COUNT;
-    currentPNGFrameIndex = pngIdx;
   }
 
-  drawPNGFrame();
-  requestAnimationFrame(pngLoop);
-}
-
-function drawPNGFrame(){
-  if(!fxCtx) return;
   fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
   const img = pngFrames[pngIdx];
   if(img && img.complete){
     fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
   }
+  requestAnimationFrame(pngLoop);
 }
 
 function startPNG(size){
@@ -149,18 +187,16 @@ function startPNG(size){
   fxCanvas.height = size;
 
   if(pngPlaying) return;
-  pngPlaying = true;
-  lastTS = 0; acc = 0;
+  pngPlaying=true;
+  lastTS=0; acc=0;
   requestAnimationFrame(pngLoop);
 }
 
 function stopPNG(){
-  pngPlaying = false;
-  pngIdx = 0;
-  acc = 0;
+  pngPlaying=false;
 }
 
-/* ---------- overlay ---------- */
+/* ---------- overlay control ---------- */
 function showOverlay(sizePx){
   overlayContainer.style.display='block';
   overlayContainer.style.width=sizePx+'px';
@@ -173,7 +209,7 @@ function showOverlay(sizePx){
     if(!document.getElementById('fxVideo')){
       overlayContainer.innerHTML=overlayVideoMarkup();
     }
-    try{document.getElementById('fxVideo').play();}catch(e){}
+    document.getElementById('fxVideo')?.play();
   }
 }
 
@@ -185,8 +221,11 @@ function hideOverlay(){
 /* ---------- camera ---------- */
 startBtn.onclick=async()=>{
   startBtn.style.display='none';
+  captureBtn.style.display='flex';
+
   const stream=await navigator.mediaDevices.getUserMedia({
-    video:{facingMode:'environment'},audio:true
+    video:{facingMode:'environment'},
+    audio:true
   });
   cam.srcObject=stream;
   await cam.play();
@@ -205,7 +244,7 @@ function resize(){
 /* ---------- worker ---------- */
 function initWorker(){
   worker=new Worker('worker.js');
-  worker.onmessage=(e)=>{
+  worker.onmessage=e=>{
     const d=e.data;
     if(d.type==='ready'){
       worker.postMessage({type:'init',targetUrl:TARGET_URL,procW,procH});
@@ -236,10 +275,104 @@ function sendFrame(){
   worker.postMessage({type:'frame',bitmap:bmp},[bmp]);
 }
 
+/* ---------- composición final ---------- */
+function drawFinalFrame(){
+  finalCanvas.width = cam.videoWidth;
+  finalCanvas.height = cam.videoHeight;
+
+  finalCtx.drawImage(cam,0,0,finalCanvas.width,finalCanvas.height);
+
+  if(overlayContainer.style.display==='block'){
+    const r=overlayContainer.getBoundingClientRect();
+    const sx=finalCanvas.width/innerWidth;
+    const sy=finalCanvas.height/innerHeight;
+
+    const x=r.left*sx;
+    const y=r.top*sy;
+    const w=r.width*sx;
+    const h=r.height*sy;
+
+    if(IS_IOS && fxCanvas){
+      finalCtx.drawImage(fxCanvas,x,y,w,h);
+    }else{
+      const v=document.getElementById('fxVideo');
+      if(v) finalCtx.drawImage(v,x,y,w,h);
+    }
+  }
+}
+
+/* ---------- FOTO ---------- */
+function takePhoto(){
+  drawFinalFrame();
+  finalCanvas.toBlob(b=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b);
+    a.download='foto_ar.png';
+    a.click();
+  },'image/png');
+}
+
+/* ---------- VIDEO MP4 ---------- */
+function startRecording(){
+  recordedChunks=[];
+  recording=true;
+
+  const stream=finalCanvas.captureStream(30);
+
+  let options;
+  if(MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E')){
+    options={mimeType:'video/mp4;codecs=avc1.42E01E'};
+  }else{
+    options={mimeType:'video/webm'};
+  }
+
+  mediaRecorder=new MediaRecorder(stream,options);
+  mediaRecorder.ondataavailable=e=>recordedChunks.push(e.data);
+  mediaRecorder.onstop=()=>{
+    const blob=new Blob(recordedChunks,{type:mediaRecorder.mimeType});
+    const ext=blob.type.includes('mp4')?'mp4':'webm';
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='video_ar.'+ext;
+    a.click();
+  };
+  mediaRecorder.start();
+}
+
+function stopRecording(){
+  recording=false;
+  if(mediaRecorder?.state!=='inactive'){
+    mediaRecorder.stop();
+  }
+}
+
+/* ---------- botón cámara ---------- */
+let pressTimer;
+
+captureBtn.addEventListener('touchstart',e=>{
+  e.preventDefault();
+  pressTimer=setTimeout(()=>{
+    captureBtn.classList.add('recording');
+    startRecording();
+  },300);
+});
+
+captureBtn.addEventListener('touchend',()=>{
+  clearTimeout(pressTimer);
+  if(recording){
+    stopRecording();
+    captureBtn.classList.remove('recording');
+  }else{
+    takePhoto();
+  }
+});
+
+/* ---------- loop ---------- */
 function loop(){
   if(!streaming) return;
   frameCounter=(frameCounter+1)%FRAME_SKIP;
   if(frameCounter===0) sendFrame();
+  if(recording) drawFinalFrame();
   requestAnimationFrame(loop);
 }
 </script>
