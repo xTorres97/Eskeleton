@@ -3,111 +3,88 @@
 <head>
 <meta charset="utf-8"/>
 <title>AR Camiseta</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no"/>
 
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Arial}
-#videoWrapper{position:fixed;inset:0}
-#cam{width:100%;height:100%;object-fit:cover}
+#cam{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
 #overlayContainer{
   position:fixed;
   left:50%;top:50%;
   transform:translate(-50%,-50%);
   pointer-events:none;
-  z-index:9;
+  z-index:2;
   display:none;
 }
 #overlayContainer video,
 #overlayContainer canvas{
-  width:100%;
-  height:100%;
+  width:100%;height:100%;
   object-fit:contain;
-  background:transparent;
 }
 #startBtn{
   position:fixed;left:50%;top:50%;
   transform:translate(-50%,-50%);
   padding:14px 20px;
-  font-size:18px;
-  border:none;border-radius:10px;
-  background:#ff4fa8;color:#fff;
-  z-index:10;
+  font-size:18px;border:none;border-radius:10px;
+  background:#ff4fa8;color:#fff;z-index:5;
 }
 #captureBtn{
-  position:fixed;
-  bottom:28px;
-  left:50%;
+  position:fixed;bottom:28px;left:50%;
   transform:translateX(-50%);
-  width:78px;height:78px;
-  border-radius:50%;
-  background:#fff;
-  border:6px solid rgba(255,255,255,.6);
-  z-index:10;
-  touch-action:none;
-  display:none;
+  width:78px;height:78px;border-radius:50%;
+  background:#fff;border:6px solid rgba(255,255,255,.6);
+  z-index:5;display:none;
 }
 #captureBtn.recording{
-  background:#ff3b30;
-  border-color:#ff3b30;
+  background:#ff3b30;border-color:#ff3b30;
   transform:translateX(-50%) scale(1.15);
 }
 #captureBtn::after{
-  content:'';
-  position:absolute;
-  inset:10px;
-  border-radius:50%;
-  background:rgba(0,0,0,.05);
+  content:'';position:absolute;inset:10px;
+  border-radius:50%;background:rgba(0,0,0,.05);
 }
 </style>
 </head>
 
 <body>
 
-<div id="videoWrapper">
-  <video id="cam" autoplay playsinline muted></video>
-</div>
-
+<video id="cam" autoplay playsinline muted></video>
 <div id="overlayContainer"></div>
 
 <button id="startBtn">Activar AR</button>
 <button id="captureBtn"></button>
 
 <script>
-/* ================= CONFIG ================= */
-const TARGET_URL = './skeleton.png';
-const WEBM_URL   = './skeleton.webm';
-const PNG_PATH   = './assets/anim_png/';
-const PNG_COUNT  = 8;
-const PNG_FPS    = 8;
-const REQUIRED_MATCHES = 10;
-const REQUIRED_INLIERS = 8;
-const MIN_OVERLAY_SCALE = 0.35;
-const MAX_OVERLAY_SCALE = 0.85;
-/* ========================================= */
+/* ===== CONFIG ===== */
+const TARGET_URL='./skeleton.png';
+const WEBM_URL='./skeleton.webm';
+const PNG_PATH='./assets/anim_png/';
+const PNG_COUNT=8, PNG_FPS=8;
+const REQUIRED_MATCHES=10, REQUIRED_INLIERS=8;
+const MIN_OVERLAY_SCALE=0.35, MAX_OVERLAY_SCALE=0.85;
+/* ================= */
 
-const cam = document.getElementById('cam');
-const overlayContainer = document.getElementById('overlayContainer');
-const startBtn = document.getElementById('startBtn');
-const captureBtn = document.getElementById('captureBtn');
+const cam=startBtn.previousElementSibling;
+const overlayContainer=document.getElementById('overlayContainer');
+const startBtn=document.getElementById('startBtn');
+const captureBtn=document.getElementById('captureBtn');
 
-let worker=null, streaming=false;
-let procW=1, procH=1;
-let offscreen;
-let frameCounter=0;
-let RES_SCALE=0.7, FRAME_SKIP=2;
+let worker,streaming=false,procW=1,procH=1;
+let offscreen,frameCounter=0;
+const RES_SCALE=0.6, FRAME_SKIP=2;
 
-/* ---------- iOS detection ---------- */
-const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-(navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+/* ===== iOS detect ===== */
+const IS_IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||
+(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 
-/* ---------- Overlay animation ---------- */
-const overlayVideoMarkup = () => `
+/* ===== Overlay ===== */
+const overlayVideoMarkup=()=>`
 <video id="fxVideo" autoplay loop muted playsinline>
   <source src="${WEBM_URL}" type="video/webm">
 </video>`;
 
-let pngFrames=[], pngIdx=0, fxCanvas=null, fxCtx=null;
-let pngPlaying=false, lastTS=0, acc=0;
+let pngFrames=[],pngIdx=0,fxCanvas,fxCtx;
+let pngPlaying=false,lastTS=0,acc=0;
 const PNG_FRAME_TIME=1000/PNG_FPS;
 
 function preloadPNGs(){
@@ -123,7 +100,7 @@ function pngLoop(ts){
   if(!pngPlaying) return;
   if(!lastTS) lastTS=ts;
   acc+=ts-lastTS; lastTS=ts;
-  if(acc>=PNG_FRAME_TIME){ acc=0; pngIdx=(pngIdx+1)%PNG_COUNT; }
+  if(acc>=PNG_FRAME_TIME){acc=0;pngIdx=(pngIdx+1)%PNG_COUNT;}
   fxCtx.clearRect(0,0,fxCanvas.width,fxCanvas.height);
   const img=pngFrames[pngIdx];
   if(img?.complete) fxCtx.drawImage(img,0,0,fxCanvas.width,fxCanvas.height);
@@ -138,28 +115,22 @@ function showOverlay(size){
   if(IS_IOS){
     preloadPNGs();
     fxCanvas=document.createElement('canvas');
-    fxCanvas.width=size; fxCanvas.height=size;
+    fxCanvas.width=size;fxCanvas.height=size;
     fxCtx=fxCanvas.getContext('2d');
     overlayContainer.appendChild(fxCanvas);
-    pngPlaying=true; lastTS=0; acc=0;
+    pngPlaying=true;lastTS=0;acc=0;
     requestAnimationFrame(pngLoop);
-  }else{
-    overlayContainer.innerHTML=overlayVideoMarkup();
-  }
+  }else overlayContainer.innerHTML=overlayVideoMarkup();
 }
-function hideOverlay(){ overlayContainer.style.display='none'; pngPlaying=false; }
+function hideOverlay(){overlayContainer.style.display='none';pngPlaying=false;}
 
-/* ---------- Camera ---------- */
+/* ===== Camera ===== */
 startBtn.onclick=async()=>{
   startBtn.style.display='none';
   captureBtn.style.display='block';
   const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:true});
-  cam.srcObject=stream;
-  await cam.play();
-  streaming=true;
-  resize();
-  initWorker();
-  loop();
+  cam.srcObject=stream;await cam.play();
+  streaming=true;resize();initWorker();loop();
 };
 
 function resize(){
@@ -168,7 +139,7 @@ function resize(){
   offscreen=new OffscreenCanvas(procW,procH);
 }
 
-/* ---------- Worker ---------- */
+/* ===== Worker ===== */
 function initWorker(){
   worker=new Worker('worker.js');
   worker.onmessage=e=>{
@@ -177,7 +148,7 @@ function initWorker(){
       worker.postMessage({type:'init',targetUrl:TARGET_URL,procW,procH});
     if(d.type==='result'){
       if(d.matches<REQUIRED_MATCHES||d.inliers<REQUIRED_INLIERS||!d.corners){
-        hideOverlay(); return;
+        hideOverlay();return;
       }
       const dx1=d.corners[2]-d.corners[0];
       const dy1=d.corners[3]-d.corners[1];
@@ -199,56 +170,71 @@ function sendFrame(){
 }
 
 function loop(){
-  if(!streaming) return;
+  if(!streaming)return;
   frameCounter=(frameCounter+1)%FRAME_SKIP;
-  if(frameCounter===0) sendFrame();
+  if(!frameCounter) sendFrame();
   requestAnimationFrame(loop);
 }
 
-/* ---------- Foto + Video (con overlay) ---------- */
-let pressTimer=null, recorder=null, chunks=[], recording=false;
+/* ===== CAPTURE (OPTIMIZADO) ===== */
+const compCanvas=document.createElement('canvas');
+const compCtx=compCanvas.getContext('2d');
+let recorder,chunks=[],recording=false,pressTimer;
 
-function compositeCanvas(){
-  const c=document.createElement('canvas');
-  c.width=cam.videoWidth; c.height=cam.videoHeight;
-  const x=c.getContext('2d');
-  x.drawImage(cam,0,0,c.width,c.height);
+function drawComposite(){
+  if(!recording)return;
+  compCtx.drawImage(cam,0,0,compCanvas.width,compCanvas.height);
   if(overlayContainer.style.display==='block'){
     const r=overlayContainer.getBoundingClientRect();
-    const scale=c.width/innerWidth;
-    x.drawImage(overlayContainer.firstElementChild,
-      r.left*scale,r.top*scale,r.width*scale,r.height*scale);
+    const s=compCanvas.width/innerWidth;
+    compCtx.drawImage(
+      overlayContainer.firstElementChild,
+      r.left*s,r.top*s,r.width*s,r.height*s
+    );
   }
-  return c;
+  requestAnimationFrame(drawComposite);
+}
+
+async function saveToGallery(blob,name){
+  const file=new File([blob],name,{type:blob.type});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){
+    try{await navigator.share({files:[file]});return;}catch{}
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;a.click();
 }
 
 function takePhoto(){
-  const c=compositeCanvas();
-  c.toBlob(b=>{
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(b);
-    a.download='foto_ar.png';
-    a.click();
-  });
+  compCanvas.width=cam.videoWidth;
+  compCanvas.height=cam.videoHeight;
+  compCtx.drawImage(cam,0,0,compCanvas.width,compCanvas.height);
+  if(overlayContainer.style.display==='block'){
+    const r=overlayContainer.getBoundingClientRect();
+    const s=compCanvas.width/innerWidth;
+    compCtx.drawImage(
+      overlayContainer.firstElementChild,
+      r.left*s,r.top*s,r.width*s,r.height*s
+    );
+  }
+  compCanvas.toBlob(b=>saveToGallery(b,'foto_ar.png'),'image/png');
 }
 
 function startRecording(){
-  const stream=compositeCanvas().captureStream(30);
-  const mime=MediaRecorder.isTypeSupported('video/mp4')
-    ?'video/mp4':'video/webm';
+  compCanvas.width=cam.videoWidth;
+  compCanvas.height=cam.videoHeight;
+  const stream=compCanvas.captureStream(30);
+  const mime=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
   recorder=new MediaRecorder(stream,{mimeType:mime});
   chunks=[];
   recorder.ondataavailable=e=>e.data.size&&chunks.push(e.data);
   recorder.onstop=()=>{
     const blob=new Blob(chunks,{type:mime});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=`video_ar.${mime.includes('mp4')?'mp4':'webm'}`;
-    a.click();
+    saveToGallery(blob,`video_ar.${mime.includes('mp4')?'mp4':'webm'}`);
   };
   recorder.start();
   recording=true;
   captureBtn.classList.add('recording');
+  drawComposite();
 }
 
 function stopRecording(){
